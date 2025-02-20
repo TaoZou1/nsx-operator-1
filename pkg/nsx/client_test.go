@@ -66,7 +66,7 @@ func TestNSXHealthChecker_CheckNSXHealth(t *testing.T) {
 }
 
 func TestGetClient(t *testing.T) {
-	cf := config.NSXOperatorConfig{NsxConfig: &config.NsxConfig{NsxApiUser: "1", NsxApiPassword: "1"}}
+	cf := config.NSXOperatorConfig{NsxConfig: &config.NsxConfig{NsxApiUser: "1", NsxApiPassword: "1", NsxApiManagers: []string{"10.0.0.1"}}}
 	cf.VCConfig = &config.VCConfig{}
 	client := GetClient(&cf)
 	assert.True(t, client != nil)
