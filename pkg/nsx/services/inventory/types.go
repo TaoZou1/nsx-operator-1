@@ -48,6 +48,9 @@ const (
 	InventoryStatusUp      = "UP"
 	InventoryStatusDown    = "DOWN"
 	InventoryStatusUnknown = "UNKNOWN"
+
+	// NCP lb error
+	NCP_LB_ERROR = "ncp/error.loadbalancer"
 )
 
 type InventoryKey struct {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha1" // #nosec G505: not used for security purposes
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/vmware/go-vmware-nsxt/common"
 	"github.com/vmware/go-vmware-nsxt/containerinventory"
@@ -492,6 +493,18 @@ func (s *InventoryService) BuildNetworkPolicy(networkPolicy *networkingv1.Networ
 		return
 	}
 
+	annos := networkPolicy.Annotations
+	var networkError []common.NetworkError
+	for key, value := range annos {
+		if strings.Contains(key, NCP_LB_ERROR) {
+			networkError = append(networkError, common.NetworkError{ErrorMessage: value})
+		}
+	}
+	networkStatus := NetworkStatusHealthy
+	if len(networkError) > 0 {
+		networkStatus = NetworkStatusUnhealthy
+	}
+
 	containerNetworkPolicy := containerinventory.ContainerNetworkPolicy{
 		DisplayName:        networkPolicy.Name,
 		ResourceType:       string(ContainerNetworkPolicy),
@@ -499,8 +512,8 @@ func (s *InventoryService) BuildNetworkPolicy(networkPolicy *networkingv1.Networ
 		ContainerClusterId: s.NSXConfig.Cluster,
 		ContainerProjectId: string(namespace.UID),
 		ExternalId:         string(networkPolicy.UID),
-		NetworkErrors:      nil,
-		NetworkStatus:      "",
+		NetworkErrors:      networkError,
+		NetworkStatus:      networkStatus,
 		PolicyType:         NetworkPolicyType,
 		Spec:               string(spec),
 	}

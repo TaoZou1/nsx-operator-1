@@ -94,6 +94,12 @@ func compareContainerIngressPolicy(pre interface{}, cur interface{}, property ma
 	if pre == nil || !reflect.DeepEqual(preIngressPolicy.ContainerApplicationIds, curIngressPolicy.ContainerApplicationIds) {
 		property["container_application_ids"] = curIngressPolicy.ContainerApplicationIds
 	}
+	if pre == nil || !reflect.DeepEqual(preIngressPolicy.NetworkErrors, curIngressPolicy.NetworkErrors) {
+		property["network_errors"] = curIngressPolicy.NetworkErrors
+	}
+	if pre == nil || !reflect.DeepEqual(preIngressPolicy.NetworkStatus, curIngressPolicy.NetworkErrors) {
+		property["network_status"] = curIngressPolicy.NetworkErrors
+	}
 }
 
 func isIPChanged(pre containerinventory.ContainerApplicationInstance, cur containerinventory.ContainerApplicationInstance) bool {
