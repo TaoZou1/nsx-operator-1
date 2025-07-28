@@ -10,7 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/vmware-tanzu/nsx-operator/pkg/apis/vpc/v1alpha1"
@@ -35,6 +37,9 @@ func TestIPAddressAllocation(t *testing.T) {
 	})
 	t.Run("testIPAddressAllocationPrivateTGW", func(t *testing.T) {
 		testIPAddressAllocation(t, "./manifest/testIPAddressAllocation/ipaddressallocation_privatetgw.yaml", privateTGWCIDR)
+	})
+	t.Run("testIPAddressAllocationWithServiceVIP", func(t *testing.T) {
+		testServiceWithAllocatedIP(t)
 	})
 }
 
@@ -91,6 +96,40 @@ func assureIPAddressAllocationReady(t *testing.T, ns, ipAllocName string) {
 	require.NoError(t, err)
 }
 
+func getAllocationCIDR(t *testing.T, ns, ipAllocName string) string {
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer deadlineCancel()
+
+	var allocCIDR string
+	err := wait.PollUntilContextTimeout(deadlineCtx, 1*time.Second, defaultTimeout, false, func(ctx context.Context) (done bool, err error) {
+		resp, err := testData.crdClientset.CrdV1alpha1().IPAddressAllocations(ns).Get(context.Background(), ipAllocName, v1.GetOptions{})
+		if err != nil {
+			return false, fmt.Errorf("error when waiting for %s", ipAllocName)
+		}
+		allocCIDR = resp.Status.AllocationIPs
+		return true, nil
+	})
+	require.NoError(t, err)
+	return allocCIDR
+}
+
+func waitforServiceReady(t *testing.T, ns, svc string, expectedVIP string) error {
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), defaultTimeout)
+	defer deadlineCancel()
+	return wait.PollUntilContextTimeout(deadlineCtx, 1*time.Second, defaultTimeout, false, func(ctx context.Context) (done bool, err error) {
+		resp, err := testData.clientset.CoreV1().Services(ns).Get(ctx, svc, v1.GetOptions{})
+		if err != nil {
+			return false, fmt.Errorf("error when waiting for service %s", svc)
+		}
+		if resp.Status.LoadBalancer.Ingress != nil && len(resp.Status.LoadBalancer.Ingress) > 0 {
+			if resp.Status.LoadBalancer.Ingress[0].IP == expectedVIP {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
 func assertAllocationCIDR(t *testing.T, ns, ipAllocName, expectedCIDR string) {
 	_, expectedNet, err := net.ParseCIDR(expectedCIDR)
 	require.NoError(t, err)
@@ -127,7 +166,54 @@ func getNameFromYAML(yamlPath string) string {
 		return "guestcluster-workers-a"
 	case "ipaddressallocation_privatetgw.yaml":
 		return "guestcluster-workers-c"
+	case "tea-ipalloc.yaml":
+		return "ipalloc-vip"
 	default:
 		panic("Unknown YAML file")
 	}
+}
+
+func testServiceWithAllocatedIP(t *testing.T) {
+	serviceYaml := "./manifest/testIPAddressAllocation/tea-svc.yaml"
+	ipAllocyaml := "./manifest/testIPAddressAllocation/tea-ipalloc.yaml"
+
+	// Parse YAML to get CR's name
+	ipAllocPath, _ := filepath.Abs(ipAllocyaml)
+	require.NoError(t, applyYAML(ipAllocPath, ns))
+
+	// Assume the name is the same as defined in the respective YAML
+	ipAllocName := getNameFromYAML(ipAllocPath)
+	assureIPAddressAllocationReady(t, ns, ipAllocName)
+
+	// Check AllocationIPs
+
+	// 1. Apply Service YAML
+	require.NoError(t, applyYAML(serviceYaml, ns))
+
+	// 2. Wait for IPAddressAllocation to be ready
+	assureIPAddressAllocationReady(t, ns, ipAllocName)
+
+	// 3. Get first IP from allocationIPs
+	cidr := getAllocationCIDR(t, ns, ipAllocName)
+	require.NotEmpty(t, cidr)
+	_, ipnet, err := net.ParseCIDR(cidr)
+	require.NoError(t, err)
+	firstIP := ipnet.IP.String()
+
+	// 4. Patch Service to set spec.loadBalancerIP
+	patch := []byte(fmt.Sprintf(`{"spec":{"loadBalancerIP":"%s"}}`, firstIP))
+	_, err = testData.clientset.CoreV1().Services(ns).Patch(context.Background(), "tea-svc", types.MergePatchType, patch, v1.PatchOptions{})
+	require.NoError(t, err)
+
+	// 5. Verify Service has correct loadBalancerIP
+	err = waitforServiceReady(t, ns, "tea-svc", firstIP)
+	require.NoError(t, err)
+
+	// 6. try to delete the ip allocation, webhook should deny the request
+	err = testData.crdClientset.CrdV1alpha1().IPAddressAllocations(ns).Delete(context.TODO(), ipAllocName, metav1.DeleteOptions{})
+	log.Info("Delete IPAddressAllocation error: %s", err.Error())
+	require.ErrorContains(t, err, "denied the request")
+
+	// 6. Clean up
+	_ = deleteYAML(serviceYaml, ns)
 }
