@@ -203,11 +203,11 @@ func (s *InventoryService) BuildInventoryCluster() containerinventory.ContainerC
 	infra := &containerinventory.ContainerInfrastructureInfo{}
 	infra.InfraType = InventoryInfraTypeVsphere
 	newContainerCluster := containerinventory.ContainerCluster{
-		DisplayName:    clusterName,
+		DisplayName:    s.NSXConfig.Cluster,
 		ResourceType:   string(ContainerCluster),
 		Scope:          []containerinventory.DiscoveredResourceScope{scope},
 		ClusterType:    clusterType,
-		ExternalId:     util.GetClusterUUID(s.NSXConfig.Cluster).String(),
+		ExternalId:     clusterName,
 		NetworkErrors:  networkErrors,
 		NetworkStatus:  NetworkStatusHealthy,
 		Infrastructure: infra,
