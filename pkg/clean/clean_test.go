@@ -8,7 +8,6 @@ import (
 
 	"github.com/agiledragon/gomonkey/v2"
 	"github.com/go-logr/logr"
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -17,6 +16,7 @@ import (
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/common"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/inventory"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/ipaddressallocation"
+	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/nsxserviceaccount"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/securitypolicy"
 	sr "github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/staticroute"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/subnet"
@@ -159,11 +159,12 @@ func (m *MockCleanup) CleanupInfraResources(ctx context.Context) error {
 }
 
 func TestInitializeCleanupService_Success(t *testing.T) {
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
-
+	fakeService := common.Service{}
 	nsxClient := &nsx.Client{}
-	cf := &config.NSXOperatorConfig{}
+	cf := &config.NSXOperatorConfig{
+		CoeConfig: &config.CoeConfig{Cluster: "test-cluster"},
+	}
+	log := logr.Discard() // Use a discard logger instead of nil
 
 	patches := gomonkey.ApplyFunc(vpc.InitializeVPC, func(service common.Service) (*vpc.VPCService, error) {
 		return &vpc.VPCService{}, nil
@@ -191,21 +192,33 @@ func TestInitializeCleanupService_Success(t *testing.T) {
 	patches.ApplyFunc(inventory.InitializeService, func(service common.Service, _ bool) (*inventory.InventoryService, error) {
 		return &inventory.InventoryService{}, nil
 	})
+	patches.ApplyFunc(nsxserviceaccount.InitializeNSXServiceAccount, func(service common.Service) (*nsxserviceaccount.NSXServiceAccountService, error) {
+		return &nsxserviceaccount.NSXServiceAccountService{}, nil
+	})
 
-	cleanupService, err := InitializeCleanupService(cf, nsxClient, nil)
+	// Mock the NewHealthCleaner function to avoid nil pointer dereference
+	patches.ApplyFunc(NewHealthCleaner, func(service common.Service, log *logr.Logger, nsxClient *nsx.Client, clusterID string) *HealthCleaner {
+		return &HealthCleaner{
+			Service:   fakeService,
+			log:       log,
+			nsxClient: nsxClient,
+			clusterID: "test-cluster",
+		}
+	})
+
+	cleanupService, err := InitializeCleanupService(cf, nsxClient, &log)
 	assert.NoError(t, err)
 	assert.NotNil(t, cleanupService)
-	assert.Len(t, cleanupService.vpcPreCleaners, 4)
+	assert.Len(t, cleanupService.vpcPreCleaners, 5)
 	assert.Len(t, cleanupService.vpcChildrenCleaners, 5)
 	assert.Len(t, cleanupService.infraCleaners, 2)
 }
 
 func TestInitializeCleanupService_VPCError(t *testing.T) {
-	mockCtrl := gomock.NewController(t)
-	defer mockCtrl.Finish()
 
 	nsxClient := &nsx.Client{}
 	cf := &config.NSXOperatorConfig{}
+	log := logr.Discard() // Use a discard logger instead of nil
 
 	expectedError := errors.New("vpc init error")
 	patches := gomonkey.ApplyFunc(vpc.InitializeVPC, func(service common.Service) (*vpc.VPCService, error) {
@@ -231,7 +244,7 @@ func TestInitializeCleanupService_VPCError(t *testing.T) {
 		return &subnetbinding.BindingService{}, nil
 	})
 
-	cleanupService, err := InitializeCleanupService(cf, nsxClient, nil)
+	cleanupService, err := InitializeCleanupService(cf, nsxClient, &log)
 	assert.NoError(t, err)
 	assert.NotNil(t, cleanupService)
 	// Note, the services added after VPCService should fail because of the error returned in `InitializeVPC`.

@@ -14,6 +14,7 @@ import (
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/common"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/inventory"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/ipaddressallocation"
+	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/nsxserviceaccount"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/securitypolicy"
 	sr "github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/staticroute"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/subnet"
@@ -21,6 +22,7 @@ import (
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/subnetport"
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/vpc"
 	nsxutil "github.com/vmware-tanzu/nsx-operator/pkg/nsx/util"
+	"github.com/vmware-tanzu/nsx-operator/pkg/util"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -89,6 +91,10 @@ func Clean(ctx context.Context, cf *config.NSXOperatorConfig, log *logr.Logger, 
 	}
 
 	if err := cleanupService.cleanupInfraResources(ctx); err != nil {
+		return errors.Join(nsxutil.CleanupResourceFailed, err)
+	}
+
+	if err := cleanupService.cleanupHealthResources(ctx); err != nil {
 		return errors.Join(nsxutil.CleanupResourceFailed, err)
 	}
 
@@ -161,6 +167,18 @@ func InitializeCleanupService(cf *config.NSXOperatorConfig, nsxClient *nsx.Clien
 		}
 	}
 
+	wrapInitializeHealthCleaner := func(service common.Service) cleanupFunc {
+		return func() (interface{}, error) {
+			clusterUUID := util.GetClusterUUID(cf.Cluster).String()
+			return NewHealthCleaner(service, log, nsxClient, clusterUUID), nil
+		}
+	}
+	wrapInitializeNSXServiceAccount := func(service common.Service) cleanupFunc {
+		return func() (interface{}, error) {
+			return nsxserviceaccount.InitializeNSXServiceAccount(service)
+		}
+	}
+
 	cleanupService.vpcService = vpcService
 	// TODO: initialize other CR services
 	cleanupService = cleanupService.
@@ -172,7 +190,9 @@ func InitializeCleanupService(cf *config.NSXOperatorConfig, nsxClient *nsx.Clien
 		AddCleanupService(wrapInitializeVPC(commonService)).
 		AddCleanupService(wrapInitializeIPAddressAllocation(commonService)).
 		AddCleanupService(wrapInitializeInventory(commonService)).
-		AddCleanupService(wrapInitializeLBInfraCleaner(commonService))
+		AddCleanupService(wrapInitializeLBInfraCleaner(commonService)).
+		AddCleanupService(wrapInitializeHealthCleaner(commonService)).
+		AddCleanupService(wrapInitializeNSXServiceAccount(commonService))
 
 	return cleanupService, nil
 }
