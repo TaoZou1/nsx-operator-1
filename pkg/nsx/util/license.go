@@ -10,6 +10,7 @@ const (
 	LicenseContainerNetwork = "CONTAINER_NETWORKING"
 	LicenseDFW              = "DFW"
 	LicenseContainer        = "CONTAINER"
+	LicenseVPCSecurity      = "VPC_SECURITY"
 )
 
 var (
@@ -23,6 +24,7 @@ var (
 		},
 		FeatureDFW: {LicenseDFW},
 	}
+	enableVpcNetwork bool
 )
 
 func init() {
@@ -40,10 +42,29 @@ type NsxLicense struct {
 	ResultCount int `json:"result_count"`
 }
 
+func GetDFWLicense() bool {
+	licenseMutex.Lock()
+	defer licenseMutex.Unlock()
+	if enableVpcNetwork {
+		return IsLicensed(LicenseVPCSecurity)
+	} else {
+		return IsLicensed(LicenseDFW)
+	}
+}
+
 func IsLicensed(feature string) bool {
 	licenseMutex.Lock()
 	defer licenseMutex.Unlock()
 	return licenseMap[feature]
+}
+
+func SetEnableVpcNetwork(vpcNetwork bool) {
+	enableVpcNetwork = vpcNetwork
+	if enableVpcNetwork {
+		Feature_license_map[FeatureDFW] = []string{LicenseVPCSecurity}
+	} else {
+		Feature_license_map[FeatureDFW] = []string{LicenseDFW}
+	}
 }
 
 func UpdateLicense(feature string, isLicensed bool) {

@@ -130,3 +130,39 @@ func TestUpdateFeatureLicense(t *testing.T) {
 	assert.False(t, IsLicensed(FeatureDFW))
 	assert.False(t, IsLicensed(FeatureContainer))
 }
+
+func TestSetEnableVpcNetwork(t *testing.T) {
+	// Test enabling VPC network
+	SetEnableVpcNetwork(true)
+	assert.Equal(t, []string{LicenseVPCSecurity}, Feature_license_map[FeatureDFW])
+
+	// Test disabling VPC network
+	SetEnableVpcNetwork(false)
+	assert.Equal(t, []string{LicenseDFW}, Feature_license_map[FeatureDFW])
+
+	// Test toggling back to enabled
+	SetEnableVpcNetwork(true)
+	assert.Equal(t, []string{LicenseVPCSecurity}, Feature_license_map[FeatureDFW])
+}
+func TestGetSecurityPolicyLicense(t *testing.T) {
+	// Test with VPC network disabled, DFW licensed
+	SetEnableVpcNetwork(false)
+	UpdateLicense(LicenseDFW, true)
+	assert.True(t, GetDFWLicense())
+
+	// Test with VPC network disabled, DFW not licensed
+	UpdateLicense(LicenseDFW, false)
+	assert.False(t, GetDFWLicense())
+
+	// Test with VPC network enabled, VPC security licensed
+	SetEnableVpcNetwork(true)
+	UpdateLicense(LicenseVPCSecurity, true)
+	assert.True(t, GetDFWLicense())
+
+	// Test with VPC network enabled, VPC security not licensed
+	UpdateLicense(LicenseVPCSecurity, false)
+	assert.False(t, GetDFWLicense())
+
+	// Clean up
+	SetEnableVpcNetwork(false)
+}
