@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	gomonkey "github.com/agiledragon/gomonkey/v2"
@@ -23,7 +24,7 @@ import (
 	"github.com/vmware-tanzu/nsx-operator/pkg/config"
 	pkg_mock "github.com/vmware-tanzu/nsx-operator/pkg/mock"
 	mock_client "github.com/vmware-tanzu/nsx-operator/pkg/mock/controller-runtime/client"
-	servicecommon "github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/common"
+	serviceCommon "github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/common"
 )
 
 func TestGetVirtualMachineNameForSubnetPort(t *testing.T) {
@@ -83,17 +84,17 @@ func TestAllocateSubnetFromSubnetSet(t *testing.T) {
 	subnetSize := int64(32)
 	tests := []struct {
 		name           string
-		prepareFunc    func(*testing.T, servicecommon.VPCServiceProvider, servicecommon.SubnetServiceProvider, servicecommon.SubnetPortServiceProvider)
+		prepareFunc    func(*testing.T, serviceCommon.VPCServiceProvider, serviceCommon.SubnetServiceProvider, serviceCommon.SubnetPortServiceProvider)
 		expectedErr    string
 		expectedResult string
 	}{
 		{
 			name: "AvailableSubnet",
-			prepareFunc: func(t *testing.T, vsp servicecommon.VPCServiceProvider, ssp servicecommon.SubnetServiceProvider, spsp servicecommon.SubnetPortServiceProvider) {
+			prepareFunc: func(t *testing.T, vsp serviceCommon.VPCServiceProvider, ssp serviceCommon.SubnetServiceProvider, spsp serviceCommon.SubnetPortServiceProvider) {
 				ssp.(*pkg_mock.MockSubnetServiceProvider).On("GetSubnetsByIndex", mock.Anything, mock.Anything).
 					Return([]*model.VpcSubnet{
 						{
-							Id:             servicecommon.String("id-1"),
+							Id:             serviceCommon.String("id-1"),
 							Path:           &expectedSubnetPath,
 							Ipv4SubnetSize: &subnetSize,
 							IpAddresses:    []string{"10.0.0.1/28"},
@@ -105,21 +106,21 @@ func TestAllocateSubnetFromSubnetSet(t *testing.T) {
 		},
 		{
 			name: "ListVPCFailure",
-			prepareFunc: func(t *testing.T, vsp servicecommon.VPCServiceProvider, ssp servicecommon.SubnetServiceProvider, spsp servicecommon.SubnetPortServiceProvider) {
+			prepareFunc: func(t *testing.T, vsp serviceCommon.VPCServiceProvider, ssp serviceCommon.SubnetServiceProvider, spsp serviceCommon.SubnetPortServiceProvider) {
 				ssp.(*pkg_mock.MockSubnetServiceProvider).On("GetSubnetsByIndex", mock.Anything, mock.Anything).
 					Return([]*model.VpcSubnet{})
 				ssp.(*pkg_mock.MockSubnetServiceProvider).On("GenerateSubnetNSTags", mock.Anything)
-				vsp.(*pkg_mock.MockVPCServiceProvider).On("ListVPCInfo", mock.Anything).Return([]servicecommon.VPCResourceInfo{})
+				vsp.(*pkg_mock.MockVPCServiceProvider).On("ListVPCInfo", mock.Anything).Return([]serviceCommon.VPCResourceInfo{})
 			},
 			expectedErr: "no VPC found",
 		},
 		{
 			name: "CreateSubnet",
-			prepareFunc: func(t *testing.T, vsp servicecommon.VPCServiceProvider, ssp servicecommon.SubnetServiceProvider, spsp servicecommon.SubnetPortServiceProvider) {
+			prepareFunc: func(t *testing.T, vsp serviceCommon.VPCServiceProvider, ssp serviceCommon.SubnetServiceProvider, spsp serviceCommon.SubnetPortServiceProvider) {
 				ssp.(*pkg_mock.MockSubnetServiceProvider).On("GetSubnetsByIndex", mock.Anything, mock.Anything).
 					Return([]*model.VpcSubnet{})
 				ssp.(*pkg_mock.MockSubnetServiceProvider).On("GenerateSubnetNSTags", mock.Anything)
-				vsp.(*pkg_mock.MockVPCServiceProvider).On("ListVPCInfo", mock.Anything).Return([]servicecommon.VPCResourceInfo{{}})
+				vsp.(*pkg_mock.MockVPCServiceProvider).On("ListVPCInfo", mock.Anything).Return([]serviceCommon.VPCResourceInfo{{}})
 				ssp.(*pkg_mock.MockSubnetServiceProvider).On("CreateOrUpdateSubnet", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&model.VpcSubnet{Path: &expectedSubnetPath}, nil)
 			},
 			expectedResult: expectedSubnetPath,
@@ -277,6 +278,154 @@ func TestStatusUpdater_DeleteFail(t *testing.T) {
 	statusUpdater.DeleteFail(types.NamespacedName{Name: "name", Namespace: "ns"}, &v1alpha1.Subnet{}, fmt.Errorf("mock error"))
 }
 
+func TestCheckNetworkStack(t *testing.T) {
+	tests := []struct {
+		name          string
+		namespace     string
+		objects       []client.Object
+		wantErr       bool
+		errMsg        string
+		expectedErrIs error
+	}{
+		{
+			name:      "no NetworkInfo found",
+			namespace: "default",
+			objects:   []client.Object{},
+			wantErr:   false,
+		},
+		{
+			name:      "VLANBackedVPC not supported",
+			namespace: "default",
+			objects: []client.Object{
+				&v1alpha1.NetworkInfo{
+					ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+					VPCs: []v1alpha1.VPCState{
+						{NetworkStack: "VLANBackedVPC"},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "StaticRoute is not supported in VLANBackedVPC VPC",
+		},
+		{
+			name:      "valid FullStackVPC VPC",
+			namespace: "default",
+			objects: []client.Object{
+				&v1alpha1.NetworkInfo{
+					ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+					VPCs: []v1alpha1.VPCState{
+						{NetworkStack: "FullStackVPC"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			v1alpha1.AddToScheme(scheme)
+			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objects...).Build()
+
+			err := CheckNetworkStack(client, context.Background(), tt.namespace, "StaticRoute")
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CheckNetworkStack() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if tt.expectedErrIs != nil {
+					if !errors.Is(err, tt.expectedErrIs) {
+						t.Errorf("expected error to be %v, got %v", tt.expectedErrIs, err)
+					}
+				} else if tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("CheckNetworkStack() error = %v, want %v", err.Error(), tt.errMsg)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckAccessModeorVisibility(t *testing.T) {
+	ctx := context.TODO()
+	fakeClient := fake.NewClientBuilder().Build()
+	ns := "test-ns"
+
+	tests := []struct {
+		name         string
+		tepLess      bool
+		tepLessErr   error
+		accessMode   string
+		resourceType string
+		wantErr      bool
+		expectedErr  string
+	}{
+		{
+			name:         "TepLess is true, IPAddressAllocation, AccessMode External - Success",
+			tepLess:      true,
+			accessMode:   string(v1alpha1.IPAddressVisibilityExternal),
+			resourceType: serviceCommon.ResourceTypeIPAddressAllocation,
+			wantErr:      false,
+		},
+		{
+			name:         "TepLess is true, IPAddressAllocation, AccessMode Private - Failure",
+			tepLess:      true,
+			accessMode:   "Private",
+			resourceType: serviceCommon.ResourceTypeIPAddressAllocation,
+			wantErr:      true,
+			expectedErr:  "IPAddressVisibility other than External is not supported for VLANBackedVPC",
+		},
+		{
+			name:         "TepLess is true, Other resource, AccessMode Public - Success",
+			tepLess:      true,
+			accessMode:   string(v1alpha1.AccessModePublic),
+			resourceType: "VPCSubnet",
+			wantErr:      false,
+		},
+		{
+			name:         "TepLess is true, Other resource, AccessMode Private - Failure",
+			tepLess:      true,
+			accessMode:   string(v1alpha1.AccessModePrivate),
+			resourceType: "SubnetSet",
+			wantErr:      true,
+			expectedErr:  "AccessMode other than Public is not supported for VLANBackedVPC",
+		},
+		{
+			name:         "TepLess is false, Any AccessMode - Success",
+			tepLess:      false,
+			accessMode:   "AnyMode",
+			resourceType: "AnyResource",
+			wantErr:      false,
+		},
+		{
+			name:        "IsTepLessMode returns error",
+			tepLessErr:  fmt.Errorf("internal error"),
+			wantErr:     true,
+			expectedErr: "internal error",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Mock the IsTepLessMode function
+			// Note: Replace 'IsTepLessMode' with the actual package-qualified name if it's external
+			patches := gomonkey.ApplyFunc(IsTepLessMode, func(_ client.Client, _ context.Context, _ string) (bool, error) {
+				return tt.tepLess, tt.tepLessErr
+			})
+			defer patches.Reset()
+
+			err := CheckAccessModeorVisibility(fakeClient, ctx, ns, tt.accessMode, tt.resourceType)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Contains(t, err.Error(), tt.expectedErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestGetNamespaceType(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -289,7 +438,7 @@ func TestGetNamespaceType(t *testing.T) {
 			ns: &v1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "ns-system",
-					Annotations: map[string]string{servicecommon.AnnotationVPCNetworkConfig: "system"},
+					Annotations: map[string]string{serviceCommon.AnnotationVPCNetworkConfig: "system"},
 				},
 			},
 			vnc: &v1alpha1.VPCNetworkConfiguration{
