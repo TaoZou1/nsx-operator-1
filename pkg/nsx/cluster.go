@@ -537,6 +537,9 @@ func (nsxVersion *NsxVersion) featureSupported(feature int) bool {
 	case StaticIPReservation:
 		minVersion = nsx920Version
 		validFeature = true
+	case StatefulSetPod:
+		minVersion = nsx920Version
+		validFeature = true
 	}
 
 	if validFeature {

@@ -36,6 +36,7 @@ import (
 	"github.com/vmware-tanzu/nsx-operator/pkg/controllers/pod"
 	securitypolicycontroller "github.com/vmware-tanzu/nsx-operator/pkg/controllers/securitypolicy"
 	"github.com/vmware-tanzu/nsx-operator/pkg/controllers/service"
+	statefulsetcontroller "github.com/vmware-tanzu/nsx-operator/pkg/controllers/statefulset"
 	staticroutecontroller "github.com/vmware-tanzu/nsx-operator/pkg/controllers/staticroute"
 	"github.com/vmware-tanzu/nsx-operator/pkg/controllers/subnet"
 	subnetbindingcontroller "github.com/vmware-tanzu/nsx-operator/pkg/controllers/subnetbinding"
@@ -244,6 +245,13 @@ func startServiceController(mgr manager.Manager, nsxClient *nsx.Client) {
 			subnetbindingcontroller.NewReconciler(mgr, subnetService, subnetBindingService),
 			subnetipreservationcontroller.NewReconciler(mgr, subnetIPReservationService, subnetService),
 		)
+		// Add StatefulSet controller only if NSX version supports it (9.2.0+)
+		if commonService.NSXClient.NSXCheckVersion(nsx.StatefulSetPod) {
+			log.Info("NSX version supports StatefulSet Pod feature, enabling StatefulSet controller")
+			reconcilerList = append(reconcilerList, statefulsetcontroller.NewStatefulSetReconciler(mgr, subnetPortService))
+		} else {
+			log.Info("NSX version does not support StatefulSet Pod feature, skipping StatefulSet controller")
+		}
 		if cf.EnableInventory {
 			reconcilerList = append(reconcilerList, inventory.NewInventoryController(mgr.GetClient(), inventoryService, cf))
 		}
