@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/openlyinc/pointy"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/vmware/vsphere-automation-sdk-go/services/nsxt/model"
+	"go.openly.dev/pointy"
 
 	"github.com/vmware-tanzu/nsx-operator/pkg/nsx/services/common"
 )
