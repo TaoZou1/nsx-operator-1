@@ -90,6 +90,15 @@ spec:
                 x-kubernetes-validations:
                 - message: Value is immutable
                   rule: self == oldSelf
+              ipBlock:
+                description: IPBlock specifies the Policy path for IP Block for the
+                  allocation. If set, IP addresses of this allocation will be allocated
+                  from this IP Block, instead of the default IP Block associated with
+                  the Namespace's primary VPC.
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable
+                  rule: self == oldSelf
               ipv6AllocationPrefixLength:
                 description: |-
                   IPv6AllocationPrefixLength specifies the prefix length of IPv6 addresses.

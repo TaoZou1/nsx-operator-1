@@ -77,6 +77,11 @@ type IPAddressAllocationSpec struct {
 	// +kubebuilder:default=IPv4
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
 	IPAddressType IPAllocationAddressType `json:"ipAddressType,omitempty"`
+	// IPBlock specifies the Policy path for IP Block for the allocation.
+	// If set, IP addresses of this allocation will be allocated from this IP Block, instead of the default IP Block associated with the Namespace's primary VPC.
+	// +optional
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable"
+	IPBlock string `json:"ipBlock,omitempty"`
 }
 
 // IPAddressAllocationStatus defines the observed state of IPAddressAllocation.
